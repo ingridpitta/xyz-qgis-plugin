@@ -18,6 +18,7 @@ class AuthManager(object):
         self.ini = ini
         cp = configparser.ConfigParser()
         cp.optionxform = str
+        cp.add_section(self.ROOT)
         
         with open(ini, "a+") as f:
             f.seek(0)

@@ -86,7 +86,7 @@ class XYZHubConnector(object):
 
         self.action_clear_cache = QAction("Clear cache", parent)
         self.action_upload = QAction("Upload to New XYZ Geospace", parent)
-        self.action_basemap = QAction("Add a HERE basemap", parent)
+        self.action_basemap = QAction("Add HERE Map Tile", parent)
 
 
         self.action_magic_sync = QAction("Magic Sync (EXPERIMENTAL)", parent)

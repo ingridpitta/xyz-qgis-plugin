@@ -20,7 +20,7 @@ class MyCanvas(QgsMapCanvas):
         super().closeEvent(event)
         print("closing")
         self.closed.emit()
-# https://github.com/qgis/QGIS/blob/b3d2619976a69d7fb67b884492da491dfaba287c/python/testing/mocked.py
+# /python/testing/mocked.py
 def make_iface_canvas():
     my_iface = mock.Mock(spec=QgisInterface)
 

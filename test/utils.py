@@ -27,7 +27,7 @@ def env_to_dict(keys):
     return dict( (k, os.environ[k]) for k in keys)
     
 
-# https://github.com/qgis/QGIS/blob/b3d2619976a69d7fb67b884492da491dfaba287c/tests/src/python/test_db_manager_gpkg.py
+# /tests/src/python/test_db_manager_gpkg.py
 class BaseTestAsync(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -202,21 +202,3 @@ class CorrectOutput(object):
             txt = f.read()
         output = json.loads(txt)
         return output
-
-import sys
-from contextlib import contextmanager
-from io import StringIO
-
-# https://stackoverflow.com/questions/4219717/how-to-assert-output-with-nosetest-unittest-in-python
-# does not work with c++ code write to stdout/stderr
-@contextmanager
-def captured_output():
-    new_out, new_err = StringIO(), StringIO()
-    old_out, old_err = sys.stdout, sys.stderr
-    try:
-        sys.stdout, sys.stderr = new_out, new_err
-        yield sys.stdout, sys.stderr
-    finally:
-        sys.stdout, sys.stderr = old_out, old_err
-
-# https://stackoverflow.com/questions/5136611/capture-stdout-from-a-script-in-python
