@@ -29,10 +29,11 @@ from .gui.util_dialog import ConfirmDialog, exec_warning_dialog
 from .models import SpaceConnectionInfo, TokenModel, GroupTokenModel
 from .modules.controller import ChainController
 from .modules.controller import AsyncFun, parse_qt_args, make_qt_args, make_fun_args, parse_exception_obj, ChainInterrupt
-from .modules.loader import LoaderManager, EmptyXYZSpaceError, InitUploadLayerController, LoadLayerController, UploadLayerController
+from .modules.loader import LoaderManager, EmptyXYZSpaceError, InitUploadLayerController, LoadLayerController, UploadLayerController, EditAddController, EditRemoveController
 
-from .modules.layer.manager import LayerManager
+from .modules.layer.feat_cache import FeatureCache
 from .modules.layer import bbox_utils
+from .modules.layer.layer_utils import is_xyz_supported_layer, get_feat_upload_from_iter
 
 from .modules.network import NetManager, net_handler
 
@@ -49,8 +50,7 @@ TAG_PLUGIN = "XYZ Hub"
 LOG_TO_FILE = 1
 
 from .modules.common.signal import make_print_qgis, cb_log_qgis
-print_qgis = make_print_qgis(TAG_PLUGIN)
-
+print_qgis = make_print_qgis(TAG_PLUGIN,debug=True)
 
 class XYZHubConnector(object):
 
@@ -80,10 +80,9 @@ class XYZHubConnector(object):
         self.action_connect.setStatusTip(
             QCoreApplication.translate(PLUGIN_NAME, "status tip message" ))
 
-        self.action_magic_sync = QAction("Magic Sync (EXPERIMENTAL)", parent)
+        self.action_magic_sync = QAction("Magic Sync", parent)
 
-        if self.iface.activeLayer() is None:
-            self.action_magic_sync.setEnabled(False)
+        self.cb_layer_selected(self.iface.activeLayer())
 
         # self.action_magic_sync.setVisible(False) # disable magic sync
 
@@ -96,20 +95,19 @@ class XYZHubConnector(object):
         self.toolbar = self.iface.addToolBar(PLUGIN_NAME)
         self.toolbar.setObjectName("XYZ Hub Connector")
 
-        self.actions = [self.action_connect] 
+        self.actions = [self.action_connect, self.action_magic_sync] 
 
         for a in self.actions:
+            self.toolbar.addAction(a)
             self.iface.addPluginToWebMenu(self.web_menu, a)
 
         # # uncomment to use menu button
         # tool_btn = QToolButton(self.toolbar)
-        # for a in self.actions:
-        #     tool_btn.addAction(a)
         # tool_btn.setDefaultAction(self.action_connect)
         # tool_btn.setPopupMode(tool_btn.MenuButtonPopup)
         # self.xyz_widget_action = self.toolbar.addWidget(tool_btn) # uncomment to use menu button
 
-        self.toolbar.addAction(self.action_connect)
+        # self.toolbar.addAction(self.action_connect)
 
         self.action_help = None
 
@@ -134,14 +132,12 @@ class XYZHubConnector(object):
         self.auth_manager = AuthManager(config.USER_PLUGIN_DIR +"/auth.ini")
         
         self.token_model = GroupTokenModel(parent)
-        # self.layer = LayerManager(parent, self.iface)
 
         self.network = NetManager(parent)
         
         self.con_man = LoaderManager()
         self.con_man.config(self.network)
-        self.layer_man = LayerManager()
-
+        self.feat_cache = FeatureCache()
         ######## data flow
         # self.conn_info = SpaceConnectionInfo()
         
@@ -153,25 +149,34 @@ class XYZHubConnector(object):
         self.con_man.ld_pool.signal.progress.connect( self.cb_progress_busy) #, Qt.QueuedConnection
         self.con_man.ld_pool.signal.finished.connect( self.cb_progress_done)
         
-        QgsProject.instance().layersWillBeRemoved["QStringList"].connect( self.layer_man.remove)
+        QgsProject.instance().layersWillBeRemoved["QStringList"].connect( self.feat_cache.remove_layers)
         QgsProject.instance().layersWillBeRemoved["QStringList"].connect( self.con_man.remove)
 
-        # self.iface.currentLayerChanged.connect( self.cb_layer_selected) # UNCOMMENT
+        QgsProject.instance().layersAdded.connect( self.feat_cache.config_connection)
+
+        self.iface.currentLayerChanged.connect( self.cb_layer_selected) # UNCOMMENT
 
         if LOG_TO_FILE:
             QgsApplication.messageLog().messageReceived.connect(cb_log_qgis)
 
     def unload_modules(self):
         # self.con_man.disconnect_ux( self.iface)
-        QgsProject.instance().layersWillBeRemoved["QStringList"].disconnect( self.layer_man.remove)
+        QgsProject.instance().layersWillBeRemoved["QStringList"].disconnect( self.feat_cache.remove_layers)
         QgsProject.instance().layersWillBeRemoved["QStringList"].disconnect( self.con_man.remove)
 
-        # utils.disconnect_silent(self.iface.currentLayerChanged)
+        QgsProject.instance().layersAdded.disconnect( self.feat_cache.config_connection)
+        self.feat_cache.unload_connection()
+
+        self.iface.currentLayerChanged.disconnect( self.cb_layer_selected) # UNCOMMENT
 
         # self.iface.mapCanvas().extentsChanged.disconnect( self.debug_reload)
+        
+        # utils.disconnect_silent(self.iface.currentLayerChanged)
 
         self.secret.deactivate()
         
+        if LOG_TO_FILE:
+            QgsApplication.messageLog().messageReceived.disconnect(cb_log_qgis)
         # close_file_logger()
         pass
     def unload(self):
@@ -191,9 +196,10 @@ class XYZHubConnector(object):
     # Callback
     ###############
     def cb_layer_selected(self, qlayer):
-        flag_xyz = True if qlayer is not None and self.layer.is_xyz_supported_layer(qlayer) else False
+        flag_xyz = True if qlayer is not None and is_xyz_supported_layer(qlayer) else False
+        if flag_xyz: self.feat_cache.config_connection([qlayer])
         # disable magic sync
-        # self.action_magic_sync.setEnabled(flag_xyz)
+        self.action_magic_sync.setEnabled(flag_xyz)
         
     ############### 
     # Callback of action (main function)
@@ -426,5 +432,27 @@ class XYZHubConnector(object):
         # self.startTime = time.time()
     # not used
     def open_magic_sync_dialog(self):
-        pass
+        vlayer = self.iface.activeLayer()
+        print_qgis("cache: ",self.feat_cache.get_ids(vlayer.id()))
+
+        added_ids, removed_ids = self.feat_cache.get_ids(vlayer.id())
+        conn_info = self.feat_cache.get_conn_info(vlayer.id())
+        it = vlayer.getFeatures(added_ids)
+        lst_added_feat,_ = get_feat_upload_from_iter(it, vlayer)
+        print_qgis("lst_added_feat: ",lst_added_feat)
+
+        con_del = EditRemoveController(self.network)
+        self.con_man.add_background(con_del)
+        con_del.signal.finished.connect( lambda: self.feat_cache.reset(vlayer.id()))
+        con_del.signal.results.connect( self.make_cb_success_args("Sync edit finish") )
+        con_del.signal.error.connect( self.cb_handle_error_msg )
+
+        con = EditAddController(self.network, n_parallel=1)
+        self.con_man.add_background(con)
+        con.signal.results.connect( con_del.start_args)
+        con.signal.error.connect( self.cb_handle_error_msg )
+
+        con.start(conn_info, lst_added_feat, removed_ids)
+
+        # self.feat_cache.reset(vlayer.id())
     

@@ -153,7 +153,7 @@ class NetManager(QObject):
 
         #parallel case (merge output ? split input?)
         return reply
-    def del_features(self, conn_info, removed_feat, layer_id, **kw):
+    def del_features(self, conn_info, removed_feat, layer_id=None, **kw):
         # DELETE by Query URL, required list of feat_id
 
         query_del = {"id": ",".join(str(i) for i in removed_feat)}
@@ -169,7 +169,7 @@ class NetManager(QObject):
         self._post_send_request(reply, conn_info, kw_prop=kw_prop)
 
         return reply
-    def sync(self, conn_info, feat, layer_id, **kw):
+    def sync(self, conn_info, feat, layer_id=None, **kw):
         added_feat, removed_feat = feat
         token, space_id = conn_info.get_xyz_space()
         if not added_feat is None:

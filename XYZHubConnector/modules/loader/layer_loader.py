@@ -221,7 +221,7 @@ class InitUploadLayerController(ChainController):
     def _config(self):
         self.config_fun([
             AsyncFun( layer_utils.get_feat_iter),
-            WorkerFun( layer_utils.get_feat_upload_from_iter, self.pool),
+            WorkerFun( layer_utils.get_feat_upload_from_iter_args, self.pool),
             AsyncFun( self._setup_queue), 
         ])
     def _setup_queue(self, lst_added_feat, removed_feat):
@@ -288,3 +288,41 @@ class UploadLayerController(BaseLoop):
 
     def _handle_error(self, err):
         self.signal.error.emit(err)
+
+class EditAddController(UploadLayerController):
+    def start(self, conn_info, lst_added_feat, removed_feat, **kw):
+        self.conn_info = conn_info
+        self.lst_added_feat = queue.SimpleQueue(lst_added_feat)
+        self.removed_feat = removed_feat
+        # self.fixed_params = dict(addTags=kw["tags"]) if "tags" in kw else dict()
+
+        if self.count_active() == 0:
+            super(UploadLayerController, self).reset()
+        self.dispatch_parallel(n_parallel=self.n_parallel)
+    def _emit_finish(self):
+        super(UploadLayerController, self)._emit_finish()
+        
+        self.signal.results.emit( make_qt_args(self.conn_info, self.removed_feat))
+
+class EditRemoveController(ChainController):
+    def __init__(self, network):
+        super().__init__()
+        self.pool = QThreadPool() # .globalInstance() will crash afterward
+        self._config(network)
+    def start(self, conn_info, removed_feat, **kw):
+        if len(removed_feat) == 0:
+            # self.signal.finished.emit()
+            self.signal.results.emit(make_qt_args())
+            return
+        super().start(conn_info, removed_feat)
+        # fixed_params = dict(addTags=kw["tags"]) if "tags" in kw else dict()
+        # super().start(conn_info, removed_feat, **fixed_params)
+    def start_args(self, args):
+        a, kw = parse_qt_args(args)
+        self.start( *a, **kw)
+    def _config(self, network):
+        self.config_fun([
+            NetworkFun( network.del_features), 
+            WorkerFun( net_handler.on_received, self.pool),
+            # AsyncFun( self._process),
+        ])
